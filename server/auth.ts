@@ -1,15 +1,15 @@
 import crypto from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
-import { getDb } from './db.ts';
+import { queryOne } from './db.ts';
 import { verifyPassword } from './seed.ts';
 
 const sessions = new Map<string, { expiresAt: number }>();
 const SESSION_MS = 8 * 60 * 60 * 1000;
 
-export function login(password: string): string | null {
-  const row = getDb().prepare('SELECT password_hash FROM admin_settings WHERE id = 1').get() as
-    | { password_hash: string }
-    | undefined;
+export async function login(password: string): Promise<string | null> {
+  const row = await queryOne<{ password_hash: string }>(
+    'SELECT password_hash FROM admin_settings WHERE id = 1',
+  );
   if (!row || !verifyPassword(password, row.password_hash)) {
     return null;
   }

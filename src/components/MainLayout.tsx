@@ -4,6 +4,7 @@ import type { AppViewMode } from '../types';
 import { usePromptStore } from '../hooks/usePromptStore';
 import CategoryTree from './CategoryTree';
 import PromptBox from './PromptBox';
+import HelpBoard from './HelpBoard';
 import LoginModal from './LoginModal';
 import AdminEditor from './AdminEditor';
 import EconomicDashboard from './dashboard/EconomicDashboard';
@@ -12,7 +13,10 @@ export default function MainLayout() {
   const [view, setView] = useState<AppViewMode>('dashboard');
   const [loginOpen, setLoginOpen] = useState(false);
   const [adminOpen, setAdminOpen] = useState(false);
-  const { searchQuery, setSearchQuery, isAdmin, login, logout, error, loading } = usePromptStore();
+  const { searchQuery, setSearchQuery, isAdmin, login, logout, error, loading, level2, selectedLevel2Id } =
+    usePromptStore();
+  const selectedLevel2 = level2.find((item) => item.id === selectedLevel2Id);
+  const isBoard = selectedLevel2?.viewType === 'board';
 
   return (
     <div className="flex min-h-screen flex-col bg-canvas">
@@ -74,6 +78,8 @@ export default function MainLayout() {
             <CategoryTree />
             {loading ? (
               <div className="flex flex-1 items-center justify-center text-slate-400">불러오는 중…</div>
+            ) : isBoard ? (
+              <HelpBoard key={selectedLevel2Id ?? 'board'} />
             ) : (
               <PromptBox />
             )}

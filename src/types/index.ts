@@ -10,6 +10,7 @@ export interface CategoryLevel2 {
   name: string;
   description?: string;
   sortOrder: number;
+  viewType: 'prompt' | 'board';
 }
 
 export interface PromptTemplate {
@@ -24,6 +25,28 @@ export interface PromptTemplate {
 }
 
 export type AppViewMode = 'dashboard' | 'prompts';
+
+export type HelpBoardView = 'list' | 'detail' | 'create';
+
+export interface HelpAttachment {
+  id: string;
+  postId: string;
+  originalName: string;
+  storedName: string;
+  mimeType: string;
+  sizeBytes: number;
+  createdAt: string;
+}
+
+export interface HelpPost {
+  id: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  attachments: HelpAttachment[];
+  attachmentCount?: number;
+}
 
 export type EconomicProvider = 'ECOS' | 'EIA' | 'IMF';
 export type EconomicFrequency = 'daily' | 'monthly' | 'other';

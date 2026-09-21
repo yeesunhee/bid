@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Trash2, X } from 'lucide-react';
 import { usePromptStore } from '../hooks/usePromptStore';
 import { api } from '../lib/api';
@@ -23,8 +23,10 @@ const emptyPrompt = (level2Id: string): Partial<PromptTemplate> => ({
 
 export default function AdminEditor({ open, onClose }: Props) {
   const { level1, level2, prompts, reload } = usePromptStore();
+  const promptLevel2 = level2.filter((item) => item.viewType !== 'board');
   const [tab, setTab] = useState<Tab>('categories');
   const [error, setError] = useState<string | null>(null);
+  const [helpCount, setHelpCount] = useState(0);
   const [l1Form, setL1Form] = useState({ name: '', sortOrder: level1.length + 1 });
   const [l2Form, setL2Form] = useState({
     parentId: level1[0]?.id ?? '',
@@ -34,8 +36,18 @@ export default function AdminEditor({ open, onClose }: Props) {
   });
   const [editingL1, setEditingL1] = useState<CategoryLevel1 | null>(null);
   const [editingL2, setEditingL2] = useState<CategoryLevel2 | null>(null);
-  const [promptForm, setPromptForm] = useState<Partial<PromptTemplate>>(emptyPrompt(level2[0]?.id ?? ''));
+  const [promptForm, setPromptForm] = useState<Partial<PromptTemplate>>(
+    emptyPrompt(promptLevel2[0]?.id ?? ''),
+  );
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    void api
+      .helpPosts()
+      .then((rows) => setHelpCount(rows.length))
+      .catch(() => setHelpCount(0));
+  }, [open]);
 
   const childCount = (id: string) => level2.filter((c) => c.parentId === id).length;
   const promptCount = (id: string) => prompts.filter((p) => p.categoryLevel2Id === id).length;
@@ -231,7 +243,10 @@ export default function AdminEditor({ open, onClose }: Props) {
                         <div>
                           <p className="font-medium text-white">{item.name}</p>
                           <p className="text-xs text-slate-400">
-                            {level1.find((l) => l.id === item.parentId)?.name} · 프롬프트 {promptCount(item.id)}개
+                            {level1.find((l) => l.id === item.parentId)?.name} ·{' '}
+                            {item.viewType === 'board'
+                              ? `게시판 · 게시물 ${helpCount}개`
+                              : `프롬프트 ${promptCount(item.id)}개`}
                           </p>
                         </div>
                         <div className="flex gap-2">
@@ -239,9 +254,17 @@ export default function AdminEditor({ open, onClose }: Props) {
                             편집
                           </button>
                           <button
-                            disabled={promptCount(item.id) > 0}
+                            disabled={
+                              promptCount(item.id) > 0 || (item.viewType === 'board' && helpCount > 0)
+                            }
                             className="text-red-400 disabled:opacity-30"
-                            title={promptCount(item.id) > 0 ? '연결된 프롬프트를 먼저 이동/삭제하세요' : '삭제'}
+                            title={
+                              promptCount(item.id) > 0
+                                ? '연결된 프롬프트를 먼저 이동/삭제하세요'
+                                : item.viewType === 'board' && helpCount > 0
+                                  ? '게시물을 먼저 삭제하세요'
+                                  : '삭제'
+                            }
                             onClick={() => run(() => api.deleteLevel2(item.id))}
                           >
                             <Trash2 className="h-4 w-4" />
@@ -262,7 +285,7 @@ export default function AdminEditor({ open, onClose }: Props) {
                   onChange={(e) => setPromptForm({ ...promptForm, categoryLevel2Id: e.target.value })}
                 >
                   <option value="">단계 2 선택</option>
-                  {level2.map((l2) => (
+                  {promptLevel2.map((l2) => (
                     <option key={l2.id} value={l2.id}>
                       {level1.find((l) => l.id === l2.parentId)?.name} / {l2.name}
                     </option>
@@ -313,7 +336,7 @@ export default function AdminEditor({ open, onClose }: Props) {
                   className="ml-2 rounded-lg border border-red-500/40 px-4 py-2 text-red-200"
                   onClick={() =>
                     run(async () => {
-                      if (!confirm('카테고리와 시드 프롬프트 4건으로 리셋할까요? 추가한 프롬프트는 삭제됩니다. 경제지표 캐시는 유지됩니다.')) {
+                      if (!confirm('카테고리와 시드 프롬프트 4건으로 리셋할까요? 추가한 프롬프트는 삭제됩니다. 경제지표 캐시와 게시판 글은 유지됩니다.')) {
                         return;
                       }
                       await api.resetPrompts();

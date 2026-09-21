@@ -2,7 +2,7 @@ import type { PromptTemplate } from '../src/types/index.ts';
 
 export const SEED_LEVEL1 = [
   { id: 'l1-contract', name: '계약 품의서', sortOrder: 1 },
-  { id: 'l1-etc', name: '기타', sortOrder: 2 },
+  { id: 'l1-etc', name: '게시판', sortOrder: 2 },
 ] as const;
 
 export const SEED_LEVEL2 = [
@@ -12,6 +12,7 @@ export const SEED_LEVEL2 = [
     name: '계약 품의서',
     description: '입찰결과를 반영해 최종 계약 체결용 계약 품의서 초안을 작성합니다',
     sortOrder: 1,
+    viewType: 'prompt' as const,
   },
   {
     id: 'l2-planned-price-consulting',
@@ -19,6 +20,7 @@ export const SEED_LEVEL2 = [
     name: '예정가격 조사(컨설팅 용역)',
     description: '용역 계약 문서를 분석해 예정가격 조사서 비교표를 정리하고 검토가를 산출합니다',
     sortOrder: 2,
+    viewType: 'prompt' as const,
   },
   {
     id: 'l2-tp-cost-review',
@@ -26,6 +28,7 @@ export const SEED_LEVEL2 = [
     name: '예정가격(T/P) 산출 및 원가 검토',
     description: '공사·구매 내역과 업체 견적을 바탕으로 예정가격(T/P)과 원가 검토 보고서를 작성합니다',
     sortOrder: 3,
+    viewType: 'prompt' as const,
   },
   {
     id: 'l2-bid-proceed',
@@ -33,13 +36,15 @@ export const SEED_LEVEL2 = [
     name: '입찰 진행 품의',
     description: '구매요청 품의서·사양서 등 첨부자료를 분석해 입찰 진행 품의 초안을 작성합니다',
     sortOrder: 4,
+    viewType: 'prompt' as const,
   },
   {
     id: 'l2-help',
     parentId: 'l1-etc',
-    name: '도움말',
-    description: '사용 안내 및 기타 도움말 프롬프트',
+    name: '참고 문서 모음',
+    description: '사용 안내 및 참고 자료용 게시판',
     sortOrder: 1,
+    viewType: 'board' as const,
   },
 ] as const;
 
@@ -199,3 +204,25 @@ export const SEED_PROMPTS: PromptTemplate[] = [
     tags: ['입찰', '품의'],
   },
 ];
+
+export const SEED_HELP_POSTS = [
+  {
+    id: 'hp-intro',
+    title: '참고 문서 모음 이용 안내',
+    body: `이 게시판은 구매 입찰 지원 시스템의 사용 안내와 참고 자료를 모아 두는 공간입니다.
+
+[조회]
+- 목록에서 제목을 누르면 본문과 첨부파일을 볼 수 있습니다.
+- 첨부파일은 올린 원본 파일명으로 다운로드할 수 있습니다.
+
+[등록·삭제] (관리자)
+- 관리자 로그인 후 [+ 새 글]로 문서를 추가합니다.
+- 제목은 필수이며, 본문과 파일 첨부는 선택입니다.
+- 파일은 글당 최대 10개, 파일당 20MB이며 문서·이미지·압축 형식만 허용됩니다.
+- 글 수정은 지원하지 않습니다. 내용을 바꾸려면 삭제 후 다시 등록하세요.
+
+[다른 기능]
+- 상단 [경제지표]에서 입찰 관련 거시경제·원자재 지표를 확인합니다.
+- [프롬프트 관리]의 계약 품의서에서 업무 에이전트 프롬프트를 조회·복사합니다.`,
+  },
+] as const;

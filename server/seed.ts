@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
-import { getDb } from './db.ts';
-import { SEED_LEVEL1, SEED_LEVEL2, SEED_PROMPTS } from './seedPrompts.ts';
+import { query, queryOne } from './db.ts';
+import { SEED_LEVEL1, SEED_LEVEL2, SEED_PROMPTS, SEED_HELP_POSTS } from './seedPrompts.ts';
 import { seedEconomicCatalog, seedDefaultBidScenario } from './seedEconomic.ts';
 
 function hashPassword(password: string): string {
@@ -18,61 +18,74 @@ export function verifyPassword(password: string, stored: string): boolean {
   return crypto.timingSafeEqual(actual, expected);
 }
 
-function insertSeedCategoriesAndPrompts() {
-  const db = getDb();
-  const insertL1 = db.prepare(
-    `INSERT INTO category_level1 (id, name, sort_order) VALUES (?, ?, ?)`,
-  );
-  const insertL2 = db.prepare(
-    `INSERT INTO category_level2 (id, parent_id, name, description, sort_order) VALUES (?, ?, ?, ?, ?)`,
-  );
-  const insertPrompt = db.prepare(
-    `INSERT INTO prompts (id, category_level2_id, title, subtitle, agent_name, agent_description, content, tags)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-
+async function insertSeedCategoriesAndPrompts() {
   for (const row of SEED_LEVEL1) {
-    insertL1.run(row.id, row.name, row.sortOrder);
+    await query(`INSERT INTO category_level1 (id, name, sort_order) VALUES ($1, $2, $3)`, [
+      row.id,
+      row.name,
+      row.sortOrder,
+    ]);
   }
   for (const row of SEED_LEVEL2) {
-    insertL2.run(row.id, row.parentId, row.name, row.description, row.sortOrder);
+    await query(
+      `INSERT INTO category_level2 (id, parent_id, name, description, sort_order, view_type)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [row.id, row.parentId, row.name, row.description, row.sortOrder, row.viewType],
+    );
   }
   for (const row of SEED_PROMPTS) {
-    insertPrompt.run(
-      row.id,
-      row.categoryLevel2Id,
-      row.title,
-      row.subtitle,
-      row.agentName,
-      row.agentDescription,
-      row.content,
-      JSON.stringify(row.tags),
+    await query(
+      `INSERT INTO prompts (id, category_level2_id, title, subtitle, agent_name, agent_description, content, tags)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        row.id,
+        row.categoryLevel2Id,
+        row.title,
+        row.subtitle,
+        row.agentName,
+        row.agentDescription,
+        row.content,
+        JSON.stringify(row.tags),
+      ],
     );
   }
 }
 
-export function seedIfEmpty(adminPassword: string) {
-  const db = getDb();
-  const l1Count = db.prepare('SELECT COUNT(*) AS c FROM category_level1').get() as { c: number };
-  if (l1Count.c === 0) {
-    insertSeedCategoriesAndPrompts();
+export async function seedIfEmpty(adminPassword: string) {
+  const l1Count = await queryOne<{ c: number }>('SELECT COUNT(*)::int AS c FROM category_level1');
+  if ((l1Count?.c ?? 0) === 0) {
+    await insertSeedCategoriesAndPrompts();
   }
 
-  const admin = db.prepare('SELECT id FROM admin_settings WHERE id = 1').get();
+  const admin = await queryOne('SELECT id FROM admin_settings WHERE id = 1');
   if (!admin) {
-    db.prepare('INSERT INTO admin_settings (id, password_hash) VALUES (1, ?)').run(
+    await query('INSERT INTO admin_settings (id, password_hash) VALUES (1, $1)', [
       hashPassword(adminPassword),
-    );
+    ]);
   }
 
-  seedEconomicCatalog();
-  seedDefaultBidScenario();
+  await seedEconomicCatalog();
+  await seedDefaultBidScenario();
+  await seedHelpPostsIfEmpty();
 }
 
-export function resetPromptSeed() {
-  const db = getDb();
-  db.exec('DELETE FROM prompts;');
-  db.exec('DELETE FROM category_level2;');
-  db.exec('DELETE FROM category_level1;');
-  insertSeedCategoriesAndPrompts();
+async function seedHelpPostsIfEmpty() {
+  const count = await queryOne<{ c: number }>('SELECT COUNT(*)::int AS c FROM help_posts');
+  if ((count?.c ?? 0) > 0) return;
+  const now = new Date().toISOString();
+  for (const row of SEED_HELP_POSTS) {
+    await query(
+      `INSERT INTO help_posts (id, title, body, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (id) DO NOTHING`,
+      [row.id, row.title, row.body, now, now],
+    );
+  }
+}
+
+export async function resetPromptSeed() {
+  await query('DELETE FROM prompts');
+  await query('DELETE FROM category_level2');
+  await query('DELETE FROM category_level1');
+  await insertSeedCategoriesAndPrompts();
 }

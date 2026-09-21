@@ -1,4 +1,4 @@
-import { getDb } from '../db.ts';
+import { query, queryAll, queryOne } from '../db.ts';
 import type {
   BidCostScenario,
   DashboardPayload,
@@ -30,14 +30,12 @@ import {
 let refreshPromise: Promise<void> | null = null;
 let lastRefreshAt = 0;
 
-function loadCatalog(): CatalogSeed[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT indicator_key, provider, display_name_ko, category, frequency, unit, currency,
-              mapping_json, source_url, active, verified_at
-       FROM economic_indicator_catalog WHERE active = 1`,
-    )
-    .all() as Array<Record<string, unknown>>;
+async function loadCatalog(): Promise<CatalogSeed[]> {
+  const rows = await queryAll<Record<string, unknown>>(
+    `SELECT indicator_key, provider, display_name_ko, category, frequency, unit, currency,
+            mapping_json, source_url, active, verified_at
+     FROM economic_indicator_catalog WHERE active = 1`,
+  );
   return rows.map((row) => ({
     indicatorKey: String(row.indicator_key),
     provider: asProvider(String(row.provider)),
@@ -53,46 +51,44 @@ function loadCatalog(): CatalogSeed[] {
   }));
 }
 
-function upsertObservations(points: NormalizedIndicatorPoint[]) {
-  const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO economic_observations (
-      id, indicator_key, period, value, unit, currency, source_timestamp,
-      fetched_at, source_reference, is_estimated
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(indicator_key, period) DO UPDATE SET
-      value = excluded.value,
-      unit = excluded.unit,
-      currency = excluded.currency,
-      source_timestamp = excluded.source_timestamp,
-      fetched_at = excluded.fetched_at,
-      source_reference = excluded.source_reference,
-      is_estimated = excluded.is_estimated
-  `);
+async function upsertObservations(points: NormalizedIndicatorPoint[]) {
   for (const p of points) {
-    stmt.run(
-      observationId(p.indicatorKey, p.period),
-      p.indicatorKey,
-      p.period,
-      p.value,
-      p.unit,
-      p.currency ?? null,
-      p.sourceTimestamp,
-      p.fetchedAt,
-      p.sourceReference,
-      p.isEstimated ? 1 : 0,
+    await query(
+      `INSERT INTO economic_observations (
+         id, indicator_key, period, value, unit, currency, source_timestamp,
+         fetched_at, source_reference, is_estimated
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       ON CONFLICT (indicator_key, period) DO UPDATE SET
+         value = EXCLUDED.value,
+         unit = EXCLUDED.unit,
+         currency = EXCLUDED.currency,
+         source_timestamp = EXCLUDED.source_timestamp,
+         fetched_at = EXCLUDED.fetched_at,
+         source_reference = EXCLUDED.source_reference,
+         is_estimated = EXCLUDED.is_estimated`,
+      [
+        observationId(p.indicatorKey, p.period),
+        p.indicatorKey,
+        p.period,
+        p.value,
+        p.unit,
+        p.currency ?? null,
+        p.sourceTimestamp,
+        p.fetchedAt,
+        p.sourceReference,
+        p.isEstimated ? 1 : 0,
+      ],
     );
   }
 }
 
-function loadSeries(indicatorKey: string): NormalizedIndicatorPoint[] {
-  const catalog = loadCatalog().find((c) => c.indicatorKey === indicatorKey);
+async function loadSeries(indicatorKey: string): Promise<NormalizedIndicatorPoint[]> {
+  const catalog = (await loadCatalog()).find((c) => c.indicatorKey === indicatorKey);
   if (!catalog) return [];
-  const rows = getDb()
-    .prepare(
-      `SELECT * FROM economic_observations WHERE indicator_key = ? ORDER BY period ASC`,
-    )
-    .all(indicatorKey) as Array<Record<string, unknown>>;
+  const rows = await queryAll<Record<string, unknown>>(
+    `SELECT * FROM economic_observations WHERE indicator_key = $1 ORDER BY period ASC`,
+    [indicatorKey],
+  );
   return rows.map((row) => ({
     indicatorKey,
     provider: catalog.provider,
@@ -122,14 +118,14 @@ export async function refreshAll(force = false): Promise<{ errors: { provider: s
 
   const errors: { provider: string; message: string }[] = [];
   refreshPromise = (async () => {
-    const catalog = loadCatalog();
+    const catalog = await loadCatalog();
     const results = await Promise.allSettled(
       catalog.map(async (item) => {
         let points: NormalizedIndicatorPoint[] = [];
         if (item.provider === 'ECOS') points = await fetchEcosSeries(item);
         else if (item.provider === 'EIA') points = await fetchEiaSeries(item);
         else points = await fetchImfSeries(item);
-        upsertObservations(points);
+        await upsertObservations(points);
       }),
     );
     results.forEach((result, index) => {
@@ -150,11 +146,11 @@ export async function refreshAll(force = false): Promise<{ errors: { provider: s
   return { errors };
 }
 
-export function needsRefresh(): boolean {
-  const row = getDb()
-    .prepare('SELECT MAX(fetched_at) AS fetched FROM economic_observations')
-    .get() as { fetched: string | null };
-  if (!row.fetched) return true;
+export async function needsRefresh(): Promise<boolean> {
+  const row = await queryOne<{ fetched: string | null }>(
+    'SELECT MAX(fetched_at) AS fetched FROM economic_observations',
+  );
+  if (!row?.fetched) return true;
   return Date.now() - new Date(row.fetched).getTime() > 6 * 60 * 60 * 1000;
 }
 
@@ -162,13 +158,14 @@ function toCatalogItem(item: CatalogSeed): IndicatorCatalogItem {
   return item;
 }
 
-export function buildIndicatorSummaries(keys?: string[]): IndicatorSummary[] {
-  const catalog = loadCatalog();
+export async function buildIndicatorSummaries(keys?: string[]): Promise<IndicatorSummary[]> {
+  const catalog = await loadCatalog();
   const selected = keys?.length
     ? catalog.filter((c) => keys.includes(c.indicatorKey))
     : catalog;
-  return selected.map((item) => {
-    const series = loadSeries(item.indicatorKey);
+  const summaries: IndicatorSummary[] = [];
+  for (const item of selected) {
+    const series = await loadSeries(item.indicatorKey);
     const latest = series[series.length - 1];
     const stale = isStale(latest, item.frequency);
     let status: IndicatorSummary['status'] = 'ok';
@@ -180,7 +177,7 @@ export function buildIndicatorSummaries(keys?: string[]): IndicatorSummary[] {
       status = 'stale';
       statusMessage = '캐시 또는 기준시점이 오래되었습니다.';
     }
-    return {
+    summaries.push({
       catalog: toCatalogItem(item),
       latest,
       changes: changeSet(series, item.frequency),
@@ -190,14 +187,16 @@ export function buildIndicatorSummaries(keys?: string[]): IndicatorSummary[] {
       status,
       statusMessage,
       providerLabel: providerLabel(item.provider),
-    };
-  });
+    });
+  }
+  return summaries;
 }
 
-export function loadBidScenario(id = 'default'): BidCostScenario {
-  const row = getDb()
-    .prepare('SELECT * FROM bid_cost_scenarios WHERE id = ?')
-    .get(id) as Record<string, unknown> | undefined;
+export async function loadBidScenario(id = 'default'): Promise<BidCostScenario> {
+  const row = await queryOne<Record<string, unknown>>(
+    'SELECT * FROM bid_cost_scenarios WHERE id = $1',
+    [id],
+  );
   if (!row) {
     throw new Error('원가 시나리오가 없습니다.');
   }
@@ -211,32 +210,35 @@ export function loadBidScenario(id = 'default'): BidCostScenario {
   };
 }
 
-export function listBidScenarios(): BidCostScenario[] {
-  const rows = getDb().prepare('SELECT id FROM bid_cost_scenarios').all() as Array<{ id: string }>;
-  return rows.map((r) => loadBidScenario(r.id));
+export async function listBidScenarios(): Promise<BidCostScenario[]> {
+  const rows = await queryAll<{ id: string }>('SELECT id FROM bid_cost_scenarios');
+  const scenarios: BidCostScenario[] = [];
+  for (const r of rows) {
+    scenarios.push(await loadBidScenario(r.id));
+  }
+  return scenarios;
 }
 
-export function saveBidScenario(scenario: BidCostScenario) {
-  getDb()
-    .prepare(
-      `INSERT INTO bid_cost_scenarios (id, name, base_cost, base_fx, weights_json, risk_weights_json, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT(id) DO UPDATE SET
-         name = excluded.name,
-         base_cost = excluded.base_cost,
-         base_fx = excluded.base_fx,
-         weights_json = excluded.weights_json,
-         risk_weights_json = excluded.risk_weights_json,
-         updated_at = CURRENT_TIMESTAMP`,
-    )
-    .run(
+export async function saveBidScenario(scenario: BidCostScenario) {
+  await query(
+    `INSERT INTO bid_cost_scenarios (id, name, base_cost, base_fx, weights_json, risk_weights_json, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+     ON CONFLICT (id) DO UPDATE SET
+       name = EXCLUDED.name,
+       base_cost = EXCLUDED.base_cost,
+       base_fx = EXCLUDED.base_fx,
+       weights_json = EXCLUDED.weights_json,
+       risk_weights_json = EXCLUDED.risk_weights_json,
+       updated_at = CURRENT_TIMESTAMP`,
+    [
       scenario.id,
       scenario.name,
       scenario.baseCost,
       scenario.baseFx,
       JSON.stringify(scenario.weights),
       JSON.stringify(scenario.riskWeights ?? {}),
-    );
+    ],
+  );
 }
 
 function buildSummary(indicators: IndicatorSummary[], bid: ReturnType<typeof calculateBidCost>): ExecutiveSummaryData {
@@ -277,9 +279,11 @@ function buildSummary(indicators: IndicatorSummary[], bid: ReturnType<typeof cal
   };
 }
 
-export function buildDashboard(errors: { provider: string; message: string }[] = []): DashboardPayload {
-  const indicators = buildIndicatorSummaries();
-  const scenario = loadBidScenario();
+export async function buildDashboard(
+  errors: { provider: string; message: string }[] = [],
+): Promise<DashboardPayload> {
+  const indicators = await buildIndicatorSummaries();
+  const scenario = await loadBidScenario();
   const bidCost = calculateBidCost(scenario, indicators);
   const tbond = indicators.find((i) => i.catalog.indicatorKey === 'tbond_3y')?.latest;
   const corp = indicators.find((i) => i.catalog.indicatorKey === 'corp_aa_3y')?.latest;

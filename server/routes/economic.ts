@@ -15,7 +15,7 @@ import type { BidCostScenario } from '../../src/types/index.ts';
 const router = Router();
 
 async function ensureCache() {
-  if (needsRefresh()) {
+  if (await needsRefresh()) {
     return refreshAll(false);
   }
   return { errors: [] as { provider: string; message: string }[] };
@@ -24,7 +24,7 @@ async function ensureCache() {
 router.get('/summary', async (_req, res) => {
   try {
     const { errors } = await ensureCache();
-    const dashboard = buildDashboard(errors);
+    const dashboard = await buildDashboard(errors);
     res.json(dashboard.summary);
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
@@ -35,7 +35,7 @@ router.get('/indicators', async (req, res) => {
   try {
     const { errors } = await ensureCache();
     const category = typeof req.query.category === 'string' ? req.query.category : undefined;
-    let items = buildIndicatorSummaries();
+    let items = await buildIndicatorSummaries();
     if (category) items = items.filter((i) => i.catalog.category === category);
     res.json({ indicators: items, errors });
   } catch (error) {
@@ -46,7 +46,7 @@ router.get('/indicators', async (req, res) => {
 router.get('/indicators/:key', async (req, res) => {
   try {
     await ensureCache();
-    const items = buildIndicatorSummaries([req.params.key]);
+    const items = await buildIndicatorSummaries([req.params.key]);
     if (items.length === 0) {
       res.status(404).json({ error: '지표를 찾을 수 없습니다.' });
       return;
@@ -69,7 +69,7 @@ router.get('/series', async (req, res) => {
   try {
     await ensureCache();
     const keys = typeof req.query.keys === 'string' ? req.query.keys.split(',').filter(Boolean) : [];
-    res.json({ indicators: buildIndicatorSummaries(keys.length ? keys : undefined) });
+    res.json({ indicators: await buildIndicatorSummaries(keys.length ? keys : undefined) });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -78,7 +78,7 @@ router.get('/series', async (req, res) => {
 router.get('/dashboard', async (_req, res) => {
   try {
     const { errors } = await ensureCache();
-    res.json(buildDashboard(errors));
+    res.json(await buildDashboard(errors));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
@@ -87,38 +87,46 @@ router.get('/dashboard', async (_req, res) => {
 router.post('/refresh', requireAuth, async (_req, res) => {
   try {
     const result = await refreshAll(true);
-    res.json({ ok: true, ...result, dashboard: buildDashboard(result.errors) });
+    res.json({ ok: true, ...result, dashboard: await buildDashboard(result.errors) });
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }
 });
 
-router.get('/bid-cost', (_req, res) => {
-  res.json({ scenarios: listBidScenarios(), default: loadBidScenario() });
+router.get('/bid-cost', async (_req, res) => {
+  try {
+    res.json({ scenarios: await listBidScenarios(), default: await loadBidScenario() });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
-router.put('/bid-cost', (req, res) => {
+router.put('/bid-cost', async (req, res) => {
   const body = req.body as BidCostScenario;
   if (!body?.id || !Array.isArray(body.weights)) {
     res.status(400).json({ error: '원가 시나리오 형식이 올바르지 않습니다.' });
     return;
   }
-  saveBidScenario({
-    id: String(body.id),
-    name: String(body.name ?? '시나리오'),
-    baseCost: body.baseCost === null || body.baseCost === undefined ? null : Number(body.baseCost),
-    baseFx: body.baseFx === null || body.baseFx === undefined ? null : Number(body.baseFx),
-    weights: body.weights,
-    riskWeights: body.riskWeights,
-  });
-  res.json(loadBidScenario(body.id));
+  try {
+    await saveBidScenario({
+      id: String(body.id),
+      name: String(body.name ?? '시나리오'),
+      baseCost: body.baseCost === null || body.baseCost === undefined ? null : Number(body.baseCost),
+      baseFx: body.baseFx === null || body.baseFx === undefined ? null : Number(body.baseFx),
+      weights: body.weights,
+      riskWeights: body.riskWeights,
+    });
+    res.json(await loadBidScenario(body.id));
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 router.post('/bid-cost/calculate', async (req, res) => {
   try {
     await ensureCache();
-    const scenario = (req.body?.scenario as BidCostScenario | undefined) ?? loadBidScenario();
-    const indicators = buildIndicatorSummaries();
+    const scenario = (req.body?.scenario as BidCostScenario | undefined) ?? (await loadBidScenario());
+    const indicators = await buildIndicatorSummaries();
     res.json(calculateBidCost(scenario, indicators));
   } catch (error) {
     res.status(500).json({ error: error instanceof Error ? error.message : String(error) });

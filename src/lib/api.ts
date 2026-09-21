@@ -4,6 +4,7 @@ import type {
   CategoryLevel1,
   CategoryLevel2,
   DashboardPayload,
+  HelpPost,
   PromptTemplate,
 } from '../types';
 
@@ -68,4 +69,27 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ scenario }),
     }),
+  helpPosts: () => request<HelpPost[]>('/api/help-posts'),
+  helpPost: (id: string) => request<HelpPost>(`/api/help-posts/${id}`),
+  createHelpPost: async (title: string, body: string, files: File[]) => {
+    const headers = new Headers();
+    const token = getToken();
+    if (token) headers.set('Authorization', `Bearer ${token}`);
+    const form = new FormData();
+    form.append('title', title);
+    form.append('body', body);
+    for (const file of files) form.append('files', file);
+    const res = await fetch('/api/help-posts', { method: 'POST', headers, body: form });
+    const text = await res.text();
+    const data = text ? JSON.parse(text) : null;
+    if (!res.ok) {
+      throw new Error(data?.error || `요청 실패 (${res.status})`);
+    }
+    return data as HelpPost;
+  },
+  deleteHelpPost: (id: string) => request(`/api/help-posts/${id}`, { method: 'DELETE' }),
 };
+
+export function helpAttachmentUrl(postId: string, attachmentId: string) {
+  return `/api/help-posts/${postId}/attachments/${attachmentId}`;
+}
